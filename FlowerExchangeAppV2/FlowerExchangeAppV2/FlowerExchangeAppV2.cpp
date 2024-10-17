@@ -13,13 +13,13 @@ public:
     std::string orderId;
     std::string clientOrderId;
     std::string instrument;
-    std::string side;
+    int side;
     int quantity;
     double price;
     std::time_t timestamp;
 
     Order(const std::string& orderId, const std::string& clientOrderId, const std::string& instrument,
-        const std::string& side, int quantity, double price, std::time_t timestamp)
+        int side, int quantity, double price, std::time_t timestamp)
         : orderId(orderId), clientOrderId(clientOrderId), instrument(instrument),
         side(side), quantity(quantity), price(price), timestamp(timestamp) {}
 };
@@ -32,33 +32,34 @@ private:
     std::vector<Order> sellOrders;
 
 public:
-    // Default constructor
     OrderBook() = default;
 
-    // Constructor with instrument parameter
     OrderBook(const std::string& instrumentName) : instrument(instrumentName) {}
 
     void addOrder(const Order& order) {
-        if (order.side == "buy") {
+        if (order.side == 1) {
             buyOrders.push_back(order);
             std::sort(buyOrders.begin(), buyOrders.end(), [](const Order& a, const Order& b) {
-                return (a.price > b.price) || (a.price == b.price && a.timestamp < b.timestamp);
+                return (a.price < b.price) || (a.price == b.price && a.timestamp < b.timestamp);
                 });
         }
         else {
             sellOrders.push_back(order);
             std::sort(sellOrders.begin(), sellOrders.end(), [](const Order& a, const Order& b) {
-                return (a.price < b.price) || (a.price == b.price && a.timestamp < b.timestamp);
+                return (a.price > b.price) || (a.price == b.price && a.timestamp < b.timestamp);
                 });
         }
     }
+
+    std::vector<Order>& getBuyOrders() { return buyOrders; }
+    std::vector<Order>& getSellOrders() { return sellOrders; }
 };
 
 // ExecutionReport class
 class ExecutionReport {
 public:
     static void generateReport(const std::string& orderId, const std::string& clientOrderId, const std::string& instrument,
-        const std::string& side, const std::string& executionStatus, int quantity, double price) {
+        int side, const std::string& executionStatus, int quantity, double price) {
         std::ofstream file("Execution_Rep.csv", std::ios::app);
         if (file.is_open()) {
             file << orderId << "," << clientOrderId << "," << instrument << "," << side << ","
@@ -79,7 +80,6 @@ private:
 
 public:
     Exchange() {
-        // Explicitly create each OrderBook object with the instrument name
         orderBooks.emplace("Rose", OrderBook("Rose"));
         orderBooks.emplace("Lavender", OrderBook("Lavender"));
         orderBooks.emplace("Lotus", OrderBook("Lotus"));
@@ -98,35 +98,96 @@ public:
 
         while (std::getline(file, line)) {
             std::istringstream ss(line);
-            std::string clientOrderId, instrument, sideStr;
+            std::string clientOrderId, instrument, sideStr, quantityStr, priceStr;
             int side, quantity;
             double price;
             std::time_t timestamp = std::time(nullptr);
 
+            // Extract values based on commas
             std::getline(ss, clientOrderId, ',');
             std::getline(ss, instrument, ',');
             std::getline(ss, sideStr, ',');
-            side = std::stoi(sideStr);
-            ss >> quantity >> price;
+            std::getline(ss, quantityStr, ',');
+            std::getline(ss, priceStr, ',');
 
-            std::string sideType = (side == 1) ? "buy" : "sell";
+            // Convert extracted strings to proper types
+            side = std::stoi(sideStr);
+            quantity = std::stoi(quantityStr);
+            price = std::stod(priceStr);
+
             std::string orderId = "ord" + std::to_string(orderIdCounter++);
 
-            Order order(orderId, clientOrderId, instrument, sideType, quantity, price, timestamp);
-            orderBooks[instrument].addOrder(order);
+            Order order(orderId, clientOrderId, instrument, side, quantity, price, timestamp);
 
-            // Generate an execution report with status "New" for newly added orders
-            ExecutionReport::generateReport(orderId, clientOrderId, instrument, sideType, "New", quantity, price);
+            // Check for immediate match before adding as a "New" order
+            bool matched = checkAndExecuteTrades(orderBooks[instrument], order, instrument);
+
+            // If no immediate match is found, add as a new order
+            if (!matched) {
+                orderBooks[instrument].addOrder(order);
+                ExecutionReport::generateReport(orderId, clientOrderId, instrument, side, "New", quantity, price);
+            }
         }
 
         file.close();
+    }
+
+    bool checkAndExecuteTrades(OrderBook& orderBook, Order& newOrder, const std::string& instrument) {
+        auto& buyOrders = orderBook.getBuyOrders();
+        auto& sellOrders = orderBook.getSellOrders();
+        bool tradeExecuted = false;
+
+        // Check if the new order can match with existing orders in the order book
+        if (newOrder.side == 1 && !sellOrders.empty() && newOrder.price >= sellOrders.back().price) {
+            tradeExecuted = true;
+        }
+        else if (newOrder.side == 2 && !buyOrders.empty() && newOrder.price <= buyOrders.back().price) {
+            tradeExecuted = true;
+        }
+
+        if (tradeExecuted) {
+            // Add the new order to the order book first to ensure it's available for trade execution
+            orderBook.addOrder(newOrder);
+            executeTrades(orderBook, instrument);
+        }
+
+        return tradeExecuted;
+    }
+
+    void executeTrades(OrderBook& orderBook, const std::string& instrument) {
+        auto& buyOrders = orderBook.getBuyOrders();
+        auto& sellOrders = orderBook.getSellOrders();
+
+        while (!buyOrders.empty() && !sellOrders.empty() &&
+            buyOrders.back().price >= sellOrders.back().price) {
+
+            Order& buyOrder = buyOrders.back();
+            Order& sellOrder = sellOrders.back();
+
+            int tradeQuantity = std::min(buyOrder.quantity, sellOrder.quantity);
+            double tradePrice = sellOrder.price; // Use sell side price as trade price
+
+            ExecutionReport::generateReport(buyOrder.orderId, buyOrder.clientOrderId, instrument, 1,
+                (buyOrder.quantity == tradeQuantity) ? "Fill" : "Pfill",
+                tradeQuantity, tradePrice);
+
+            ExecutionReport::generateReport(sellOrder.orderId, sellOrder.clientOrderId, instrument, 2,
+                (sellOrder.quantity == tradeQuantity) ? "Fill" : "Pfill",
+                tradeQuantity, tradePrice);
+
+            buyOrder.quantity -= tradeQuantity;
+            sellOrder.quantity -= tradeQuantity;
+
+            if (buyOrder.quantity == 0) buyOrders.pop_back();
+            if (sellOrder.quantity == 0) sellOrders.pop_back();
+        }
     }
 };
 
 // Main function
 int main() {
     Exchange exchange;
-    std::string inputFilePath = "Orders.csv"; // Replace with the actual path to your input CSV file
+    std::string inputFilePath = "orders.csv"; // Replace with the actual path to your input CSV file
     exchange.processCSV(inputFilePath);
 
     std::cout << "Order processing completed. Execution report generated in Execution_Rep.csv" << std::endl;

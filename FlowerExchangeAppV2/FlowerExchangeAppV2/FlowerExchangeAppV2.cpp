@@ -16,12 +16,12 @@ public:
     int side;
     int quantity;
     double price;
-    std::time_t timestamp;
+    int sequenceNumber; // Sequence number to track order insertion
 
     Order(const std::string& orderId, const std::string& clientOrderId, const std::string& instrument,
-        int side, int quantity, double price, std::time_t timestamp)
+        int side, int quantity, double price, int sequenceNumber)
         : orderId(orderId), clientOrderId(clientOrderId), instrument(instrument),
-        side(side), quantity(quantity), price(price), timestamp(timestamp) {}
+        side(side), quantity(quantity), price(price), sequenceNumber(sequenceNumber) {}
 };
 
 // OrderBook class
@@ -37,16 +37,16 @@ public:
     OrderBook(const std::string& instrumentName) : instrument(instrumentName) {}
 
     void addOrder(const Order& order) {
-        if (order.side == 1) {
+        if (order.side == 1) { // Buy side
             buyOrders.push_back(order);
             std::sort(buyOrders.begin(), buyOrders.end(), [](const Order& a, const Order& b) {
-                return (a.price < b.price) || (a.price == b.price && a.timestamp < b.timestamp);
+                return (a.price < b.price) || (a.price == b.price && a.sequenceNumber < b.sequenceNumber);
                 });
         }
-        else {
+        else { // Sell side
             sellOrders.push_back(order);
             std::sort(sellOrders.begin(), sellOrders.end(), [](const Order& a, const Order& b) {
-                return (a.price > b.price) || (a.price == b.price && a.timestamp < b.timestamp);
+                return (a.price > b.price) || (a.price == b.price && a.sequenceNumber < b.sequenceNumber);
                 });
         }
     }
@@ -76,7 +76,8 @@ public:
 class Exchange {
 private:
     std::unordered_map<std::string, OrderBook> orderBooks;
-    int orderIdCounter = 1; // To generate unique Order IDs (ord1, ord2, ...)
+    int orderIdCounter = 1;       // To generate unique Order IDs (ord1, ord2, ...)
+    int sequenceCounter = 1;      // Sequence counter for orders
 
 public:
     Exchange() {
@@ -101,7 +102,6 @@ public:
             std::string clientOrderId, instrument, sideStr, quantityStr, priceStr;
             int side, quantity;
             double price;
-            std::time_t timestamp = std::time(nullptr);
 
             // Extract values based on commas
             std::getline(ss, clientOrderId, ',');
@@ -117,7 +117,8 @@ public:
 
             std::string orderId = "ord" + std::to_string(orderIdCounter++);
 
-            Order order(orderId, clientOrderId, instrument, side, quantity, price, timestamp);
+            // Create a new order with a sequence number
+            Order order(orderId, clientOrderId, instrument, side, quantity, price, sequenceCounter++);
 
             // Check for immediate match before adding as a "New" order
             bool matched = checkAndExecuteTrades(orderBooks[instrument], order, instrument);
@@ -165,8 +166,11 @@ public:
             Order& sellOrder = sellOrders.back();
 
             int tradeQuantity = std::min(buyOrder.quantity, sellOrder.quantity);
-            double tradePrice = sellOrder.price; // Use sell side price as trade price
 
+            // Compare the sequence numbers and select the price of the older order
+            double tradePrice = (buyOrder.sequenceNumber < sellOrder.sequenceNumber) ? buyOrder.price : sellOrder.price;
+
+            // Generate execution reports
             ExecutionReport::generateReport(buyOrder.orderId, buyOrder.clientOrderId, instrument, 1,
                 (buyOrder.quantity == tradeQuantity) ? "Fill" : "Pfill",
                 tradeQuantity, tradePrice);
@@ -175,11 +179,18 @@ public:
                 (sellOrder.quantity == tradeQuantity) ? "Fill" : "Pfill",
                 tradeQuantity, tradePrice);
 
+            // Update quantities after the trade
             buyOrder.quantity -= tradeQuantity;
             sellOrder.quantity -= tradeQuantity;
 
-            if (buyOrder.quantity == 0) buyOrders.pop_back();
-            if (sellOrder.quantity == 0) sellOrders.pop_back();
+            // Remove orders that are fully filled (quantity = 0)
+            if (buyOrder.quantity == 0) {
+                buyOrders.pop_back();  // Fully filled order, remove from buy side
+            }
+
+            if (sellOrder.quantity == 0) {
+                sellOrders.pop_back();  // Fully filled order, remove from sell side
+            }
         }
     }
 };

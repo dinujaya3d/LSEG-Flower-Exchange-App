@@ -265,13 +265,38 @@ public:
     }
 };
 
-// Main function
 int main() {
     Exchange exchange;
     std::string inputFilePath = "orders.csv"; // Replace with the actual path to your input CSV file
+
+    // Start timing
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    // Process the CSV file
     exchange.processCSV(inputFilePath);
 
+    // End timing
+    auto endTime = std::chrono::high_resolution_clock::now();
+
+    // Calculate the elapsed time in microseconds
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
+    long long timeSpent = duration.count();
+
+    // Print to console
     std::cout << "Order processing completed. Execution report generated in Execution_Rep.csv" << std::endl;
+    std::cout << "Time spent: " << timeSpent << " microseconds." << std::endl;
+
+    // Append the time spent to the CSV file
+    std::ofstream file("Execution_Rep.csv", std::ios::app);
+    if (file.is_open()) {
+        file << "\n" << "Total Time Spent," << timeSpent << " microseconds" << std::endl;
+        file.close();
+    }
+    else {
+        std::cerr << "Error: Unable to open Execution_Rep.csv for writing." << std::endl;
+    }
 
     return 0;
 }
+
+

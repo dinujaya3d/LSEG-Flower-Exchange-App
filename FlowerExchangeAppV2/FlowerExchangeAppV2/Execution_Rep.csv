@@ -1,5 +1,8 @@
-ord1,aa13,1,0,Rejected,0,0
-ord2,aa14,Rose,3,Rejected,100,65
-ord3,aa15,Lavender,2,Rejected,101,1
-ord4,aa16,Tulip,1,Rejected,100,-1
-ord5,aa17,Orchid,1,Rejected,1000,-1
+ord1,aa17,Lavender,1,New,50,30
+ord2,aa18,Rose,1,New,500,35
+ord2,aa18,Rose,1,Pfill,300,35
+ord3,aa19,Rose,2,Fill,300,35
+ord1,aa17,Lavender,1,Fill,50,30
+ord4,aa20,Lavender,2,Pfill,50,30
+
+Total Time Spent,3684 microseconds

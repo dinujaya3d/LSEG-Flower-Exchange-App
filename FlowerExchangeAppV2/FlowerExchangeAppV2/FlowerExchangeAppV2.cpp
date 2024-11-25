@@ -4,8 +4,26 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
+#include <chrono>
 #include <ctime>
+
+
+// Utility function to trim whitespace
+std::string trim(const std::string& str) {
+    auto start = str.begin();
+    while (start != str.end() && std::isspace(*start)) {
+        ++start;
+    }
+
+    auto end = str.end();
+    do {
+        --end;
+    } while (std::distance(start, end) > 0 && std::isspace(*end));
+
+    return std::string(start, end + 1);
+}
 
 // Order class
 class Order {
@@ -78,6 +96,7 @@ private:
     std::unordered_map<std::string, OrderBook> orderBooks;
     int orderIdCounter = 1;       // To generate unique Order IDs (ord1, ord2, ...)
     int sequenceCounter = 1;      // Sequence counter for orders
+    std::unordered_set<std::string> validInstruments = { "Rose", "Orchid", "Lavender", "Tulip", "Lotus" };
 
 public:
     Exchange() {
@@ -85,7 +104,7 @@ public:
         orderBooks.emplace("Lavender", OrderBook("Lavender"));
         orderBooks.emplace("Lotus", OrderBook("Lotus"));
         orderBooks.emplace("Tulip", OrderBook("Tulip"));
-        orderBooks.emplace("Orchid", OrderBook("Orchid"));
+        orderBooks.emplace("Lily", OrderBook("Orchid"));
     }
 
     void processCSV(const std::string& filePath) {
@@ -110,12 +129,59 @@ public:
             std::getline(ss, quantityStr, ',');
             std::getline(ss, priceStr, ',');
 
+            // Trim the instrument name
+            instrument = trim(instrument);
+
+            // Check for empty instrument
+            if (instrument.empty()) {
+                std::cout << "Empty instrument for order: " << clientOrderId << ". Order rejected." << std::endl;
+                ExecutionReport::generateReport("ord" + std::to_string(orderIdCounter++), clientOrderId, instrument, 0, "Rejected", 0, 0.0);
+                continue; // Skip to the next line
+            }
+
             // Convert extracted strings to proper types
-            side = std::stoi(sideStr);
-            quantity = std::stoi(quantityStr);
-            price = std::stod(priceStr);
+            try {
+                side = std::stoi(sideStr);
+                quantity = std::stoi(quantityStr);
+                price = std::stod(priceStr);
+            }
+            catch (...) {
+                std::cout << "Invalid order format for order: " << clientOrderId << ". Order rejected." << std::endl;
+                ExecutionReport::generateReport("ord" + std::to_string(orderIdCounter++), clientOrderId, instrument, 0, "Rejected", 0, 0.0);
+                continue;
+            }
+
+            // Validate side
+            if (side != 1 && side != 2) {
+                std::cout << "Invalid side (" << side << ") for order: " << clientOrderId << ". Order rejected." << std::endl;
+                ExecutionReport::generateReport("ord" + std::to_string(orderIdCounter++), clientOrderId, instrument, side, "Rejected", quantity, price);
+                continue;
+            }
+
+            // Validate quantity
+            if (quantity < 10 || quantity > 1000 || quantity % 10 != 0) {
+                std::cout << "Invalid quantity (" << quantity << ") for order: " << clientOrderId << ". Order rejected." << std::endl;
+                ExecutionReport::generateReport("ord" + std::to_string(orderIdCounter++), clientOrderId, instrument, side, "Rejected", quantity, price);
+                continue;
+            }
+
+            if (price <= 0.0) {
+                std::cout << "Invalid price (" << price << ") for order: " << clientOrderId << ". Order rejected." << std::endl;
+                ExecutionReport::generateReport("ord" + std::to_string(orderIdCounter++), clientOrderId, instrument, side, "Rejected", quantity, price);
+                continue;
+            }
 
             std::string orderId = "ord" + std::to_string(orderIdCounter++);
+
+            // Validate instrument against the list of valid instruments
+            if (validInstruments.find(instrument) == validInstruments.end()) {
+                std::cout << "Invalid instrument: " << instrument << " for order: " << clientOrderId << ". Order rejected." << std::endl;
+                ExecutionReport::generateReport(orderId, clientOrderId, instrument, side, "Rejected", quantity, price);
+                continue;
+            }
+
+            // Log valid order
+            std::cout << "Valid instrument: " << instrument << " for order: " << clientOrderId << std::endl;
 
             // Create a new order with a sequence number
             Order order(orderId, clientOrderId, instrument, side, quantity, price, sequenceCounter++);
@@ -132,6 +198,10 @@ public:
 
         file.close();
     }
+
+
+
+
 
     bool checkAndExecuteTrades(OrderBook& orderBook, Order& newOrder, const std::string& instrument) {
         auto& buyOrders = orderBook.getBuyOrders();
